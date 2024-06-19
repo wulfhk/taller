@@ -1,11 +1,8 @@
-from flask import Flask, render_template, Response
 import cv2
 import requests
 import numpy as np
-import torch
+import streamlit as st
 from ultralytics import YOLO
-
-app = Flask(__name__)
 
 # Dirección IP de la ESP32-CAM y URL de la transmisión de video
 ESP32_CAM_IP = '192.168.1.138'
@@ -30,37 +27,36 @@ def generate_frames():
                         bytes_data = bytes_data[b+2:]
                         # Convertir los bytes en una imagen OpenCV
                         frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
-
                         # Realizar la detección de objetos
                         results = model(frame)
-
                         # Dibujar las detecciones en el frame
                         for result in results:
                             for box in result.boxes:
                                 x1, y1, x2, y2 = map(int, box.xyxy[0])  # Coordenadas del cuadro delimitador
                                 conf = box.conf[0]  # Confianza
                                 cls = int(box.cls[0])  # Clase
-
                                 # Solo dibujar si es la segunda clase (índice 1)
                                 if cls == 1 and conf >= 0.7:
                                     label = f'{model.names[cls]} {conf:.2f}'
                                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                                     cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
                         ret, buffer = cv2.imencode('.jpg', frame)
                         frame = buffer.tobytes()
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                        yield frame
         except Exception as e:
             print("Error:", e)
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+def app():
+    st.title("Detección de objetos en tiempo real")
+    frame_placeholder = st.empty()
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    while True:
+        frames = generate_frames()
+        try:
+            frame = next(frames)
+            frame_placeholder.image(frame, channels="BGR")
+        except StopIteration:
+            break
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    app()
